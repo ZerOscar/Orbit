@@ -1,0 +1,23 @@
+<!--
+  承载环形菜单的窗口。三个属性是这套交互的地基：
+  - SystemDecorations=None + Background=Transparent：只画出环，没有窗口框
+  - Topmost：盖在所有窗口上
+  - ShowActivated=False：不抢焦点（拖拽模式下必须，否则拖拽会断）
+  窗口只创建一次，之后 show/hide 复用，所以再打开是即时的。
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="using:Orbit.App.Controls"
+        x:Class="Orbit.App.Views.RadialWindow"
+        Title="Orbit"
+        SystemDecorations="None"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        CanResize="False">
+  <Panel x:Name="Root" Background="Transparent">
+    <c:DonutMenu x:Name="Donut" />
+  </Panel>
+</Window>

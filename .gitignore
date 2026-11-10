@@ -1,0 +1,58 @@
+# 构建产物
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pdb
+*.mdb
+*.cache
+*.ilk
+*.nupkg
+*.snupkg
+
+# 发布产物（45 MB 单文件，走 Releases，不进仓库）
+dist/
+publish/
+artifacts/
+
+# 测试与临时产物
+[Tt]est[Rr]esults/
+coverage*.xml
+coverage*.json
+*.trx
+*.coverage
+[Qq]uick[Cc]onsole/
+
+# Rider / VS / VS Code
+.idea/
+.vs/
+.vscode/
+*.DotSettings.user
+
+# 调试期截图与抓包（build/ 下脚本的临时输出）
+build/*.png
+build/*.log
+build/tmp/
+
+# 操作系统
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Python 缓存（build/ 下的脚本）
+__pycache__/
+*.py[cod]
+
+# 本机配置与私密文件
+*.local.json
+.env
+.env.*
+secrets.json
+
+# 内部开发笔记（描述设计取舍与踩坑，不对外）
+DEV-NOTES.md
+NOTES.md

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 构建与测试（Windows）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      # Release 配置在 csproj 里默认带 RuntimeIdentifier=win-x64（为单文件发布准备），
+      # 所以 restore 时必须显式把 RID 列进去，否则 build 会报 assets 缺少 net9.0/win-x64 目标。
+      # 仓库里的 NuGet.config 含国内镜像，CI 上直接指定官方源，避免拉取超时。
+      - name: 还原
+        run: >
+          dotnet restore Orbit.sln
+          -p:RuntimeIdentifiers=win-x64
+          --source https://api.nuget.org/v3/index.json
+
+      - name: 构建
+        run: dotnet build Orbit.sln -c Release --no-restore -warnaserror
+
+      - name: 单元测试
+        run: dotnet test tests/Orbit.Tests/Orbit.Tests.csproj -c Release --no-build --logger "console;verbosity=normal"

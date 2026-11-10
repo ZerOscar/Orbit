@@ -1,0 +1,7 @@
+<Project>
+  <!-- Release 发布产物不带调试符号，避免 dist 里混入 pdb。 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+</Project>
