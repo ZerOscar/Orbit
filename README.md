@@ -42,6 +42,8 @@ Orbit 换个做法——把一组动作摆成一个环，**直接浮在光标位
 | **全自绘渲染** | 一个 `Control` 手绘圆角环 + 弹簧动画 + 错峰入场，零子控件、零图片资源 |
 | **可视化设置** | 左侧永远显示环本身，改半径、孔洞、浓度、顺序都即时反映；保存即生效，不用重启 |
 | **拖拽重排** | 列表里按住行上下拖，环上的顺序实时跟着变 |
+| **开机自启** | 设置里一个开关，写当前用户的 `Run` 项，不需要管理员权限。启动时自动对齐，被清理工具删了会补回来 |
+| **更新提醒** | 启动后静默比对 GitHub 上的最新版本，有新版的在右下角提示一次，不下载、不自动安装 |
 | **单文件分发** | 45 MB 一个 exe，双击即用，目标机器不需要装 .NET |
 
 ## 安装
@@ -88,13 +90,26 @@ dotnet run --project src/Orbit.App
 
 > 所有手势都能在设置里改，包括修饰键组合、拖动灵敏度、长按时长。切片顺序即环上顺序，第 1 个从正上方开始顺时针排。
 
+## 更新
+
+程序启动 6 秒后（避开启动高峰）静默问一次 GitHub 上的最新 Release，只读版本号，不下载任何东西。
+
+- **有新版**：右下角弹一张卡片，没人理它 8 秒后自己消失；托盘菜单顶部同时出现「发现新版本 vX.Y.Z」。点卡片打开 Release 页，下载新的 exe 覆盖旧的就行。
+- **没新版，或者网络不通**：完全不打扰，只在日志里留一行。
+- **频率**：24 小时内最多问一次；**同一个版本只提醒一次**——不会每次开机都弹。
+- **不想要**：设置 → 通用 → 取消「启动时检查新版本」。
+
+![更新提醒](docs/update-toast.png)
+
+不想要自动提醒也可以，手动到 [Releases](../../releases) 下最新 zip 覆盖 `Orbit.exe`。配置存在 `%APPDATA%\Orbit\`，覆盖 exe 不会丢。
+
 ## 设置界面
 
 托盘菜单 →「设置…」。左边是真实渲染的环，改了立刻能看到。
 
-| 动作页 | 手势页 |
-|---|---|
-| ![设置 · 动作](docs/settings-actions.png) | ![设置 · 手势](docs/settings-gestures.png) |
+| 动作页 | 手势页 | 通用页 |
+|---|---|---|
+| ![设置 · 动作](docs/settings-actions.png) | ![设置 · 手势](docs/settings-gestures.png) | ![设置 · 通用](docs/settings-general.png) |
 
 | 能做 | 说明 |
 |---|---|
@@ -102,6 +117,8 @@ dotnet run --project src/Orbit.App
 | 编辑切片 | 名称、图标（单字符）、类型、目标（程序/文件夹可浏览选择）、参数、悬停提示、启用 |
 | 编辑手势 | 拖拽 / 长按 / 快捷键，修饰键任意组合，可调拖动灵敏度与长按时长 |
 | 调外观 | 环半径、中心孔洞比例、切片浓度，左侧预览即时反映 |
+| 开机自启 | 写当前用户的启动项，勾上点保存即生效，失败会当场告诉你原因（多半是安全软件拦截） |
+| 检查更新 | 通用页显示当前版本，也能手动检查一次，发现有新版直接给下载页链接 |
 | 恢复默认 | 需要点两次确认，不会误触 |
 
 保存后立即生效。**打开设置期间全局手势自动暂停**——否则在设置窗口里按快捷键，菜单会弹到设置窗口头上。
@@ -116,6 +133,8 @@ dotnet run --project src/Orbit.App
   "OuterRadius": 132,
   "HoleRatio": 0.42,
   "SliceOpacity": 0.92,
+  "StartWithWindows": false,
+  "CheckForUpdates": true,
   "Triggers": [
     { "Kind": "KeyChord", "Modifiers": "Ctrl, Alt", "Key": "Space", "Enabled": true },
     { "Kind": "Drag", "Modifiers": "Ctrl, Alt", "Button": "Left", "DragThreshold": 0, "Enabled": true }
@@ -128,6 +147,8 @@ dotnet run --project src/Orbit.App
 ```
 
 `Id` 由程序自动生成，手写配置时可以省略；`DragThreshold` 填 `0` 表示用默认阈值。
+
+`StartWithWindows` 只记录你的意图，真正生效的是注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 里的 `Orbit` 项——程序在启动时和保存设置时把两边对齐，所以手改配置也能生效。
 
 **动作类型**
 
@@ -190,8 +211,11 @@ dotnet run --project src/Orbit.App      # 前台运行，Ctrl+C 退出
 ```bash
 ORBIT_TRACE=1 dotnet run --project src/Orbit.App                     # 打印按键、落点、重排
 ORBIT_SNAPSHOT=out.png dotnet run --project src/Orbit.App            # 离屏渲染一张环截图后退出
-ORBIT_SETTINGS_SNAPSHOT=out.png ...                                  # 渲染设置页（ORBIT_SETTINGS_TAB=1 看手势页）
+ORBIT_SETTINGS_SNAPSHOT=out.png ...                                  # 渲染设置页（ORBIT_SETTINGS_TAB=0/1/2 看动作/手势/通用页）
 ORBIT_OPEN_SETTINGS=1 dotnet run --project src/Orbit.App             # 启动即开设置窗口，方便脚本操作真实窗口
+ORBIT_FAKE_UPDATE=1 dotnet run --project src/Orbit.App               # 伪造一次「发现新版本」，用于验证提醒卡片
+ORBIT_TOAST_SNAPSHOT=out.png ...                                     # 配合上面，把提醒卡片渲染成 PNG 后退出
+ORBIT_AUTO_CHECK=1 ...                                               # 打开设置页自动点一次「检查更新」，用于截取异步结果
 ```
 
 日志在 `%APPDATA%\Orbit\orbit.log`，启动行带 `启动耗时 xxxms`——改完东西可以直接对着数字看有没有变慢。

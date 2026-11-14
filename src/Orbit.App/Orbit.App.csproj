@@ -16,7 +16,7 @@
     <Description>环形桌面操作中枢</Description>
     <Company>Orbit</Company>
     <Copyright>Copyright © 2026 Orbit</Copyright>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 

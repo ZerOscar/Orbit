@@ -15,12 +15,16 @@ public sealed class AppHost : IDisposable
 {
     private readonly IClassicDesktopStyleApplicationLifetime _lifetime;
     private readonly WindowsGlobalInput _input = new();
+    private readonly UpdateChecker _checker = new();
     private OrbitConfig _config;
     private TriggerService? _triggers;
     private RadialController? _radial;
     private TrayIcon? _tray;
     private NativeMenuItem? _pauseItem;
+    private NativeMenuItem? _updateItem;
     private SettingsWindow? _settings;
+    private Views.UpdateToast? _toast;
+    private UpdateInfo? _availableUpdate;
 
     public AppHost(IClassicDesktopStyleApplicationLifetime lifetime)
     {
@@ -56,12 +60,137 @@ public sealed class AppHost : IDisposable
             Log.Write($"全局输入启动失败：{_triggers.Error}");
 
         CreateTray();
+        SyncAutoStart();
+        // 伪造更新的调试开关优先级高于真检查：截图验证时不该真的去问 GitHub。
+        if (!MaybeFakeUpdate())
+            MaybeCheckUpdates();
         MaybeSnapshot();
         MaybeSettingsSnapshot();
 
         // 调试用：启动后直接把设置窗口打开，方便脚本对真实窗口做点击/拖拽验证。
         if (Environment.GetEnvironmentVariable("ORBIT_OPEN_SETTINGS") == "1")
             Avalonia.Threading.DispatcherTimer.RunOnce(OpenSettings, TimeSpan.FromMilliseconds(300));
+    }
+
+    /// <summary>
+    /// 把注册表对齐到配置。启动时做一次，覆盖两种情况：
+    /// 配置说开着但启动项被清理工具删了 → 补回来；配置说关着但项还在 → 删掉。
+    /// 已经是目标状态时这里什么都不写。
+    /// </summary>
+    private void SyncAutoStart()
+    {
+        if (!AutoStart.IsSupported)
+            return;
+
+        var registered = AutoStart.IsEnabled();
+        if (_config.StartWithWindows == registered)
+            return;
+
+        if (AutoStart.Sync(_config.StartWithWindows, out var error))
+            Log.Write(_config.StartWithWindows ? "已登记开机自启" : "已移除开机自启");
+        else
+            Log.Write($"开机自启同步失败：{error}");
+    }
+
+    /// <summary>
+    /// 启动几秒后再去问版本，别和窗口、钩子的初始化抢时间。
+    /// 关掉自动检查就完全不发请求。
+    /// </summary>
+    private void MaybeCheckUpdates()
+    {
+        if (!_config.CheckForUpdates)
+            return;
+
+        _ = CheckUpdatesAsync(force: false);
+    }
+
+    private async Task CheckUpdatesAsync(bool force)
+    {
+        try
+        {
+            if (!force)
+                await Task.Delay(TimeSpan.FromSeconds(6));
+
+            var result = await _checker.CheckAsync(force);
+            Log.Write($"更新检查：{UpdateChecker.Describe(result)}");
+
+            if (result.Status == UpdateStatus.Available && result.Update is { } info)
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => ShowUpdateNotice(info));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // 更新检查是附赠功能，出任何问题都不该影响主流程。
+            Log.Write(ex, "更新检查异常");
+        }
+    }
+
+    /// <summary>
+    /// 调试用：伪造一次「发现新版本」，在没有真新版可测时验证提醒卡片。
+    /// ORBIT_FAKE_UPDATE=1 启用；再给 ORBIT_TOAST_SNAPSHOT=&lt;路径&gt; 会渲染成 PNG 后退出。
+    /// </summary>
+    private bool MaybeFakeUpdate()
+    {
+        if (Environment.GetEnvironmentVariable("ORBIT_FAKE_UPDATE") is not { Length: > 0 })
+            return false;
+
+        var fake = new UpdateInfo(
+            new Version(9, 9, 9),
+            "v9.9.9",
+            $"https://github.com/{UpdateChecker.Repository}/releases",
+            DateTimeOffset.Now,
+            null);
+
+        Log.Write("使用伪造的新版本信息（调试）");
+        ShowUpdateNotice(fake);
+        MaybeToastSnapshot();
+        return true;
+    }
+
+    private void MaybeToastSnapshot()
+    {
+        if (Environment.GetEnvironmentVariable("ORBIT_TOAST_SNAPSHOT") is not { Length: > 0 } path)
+            return;
+
+        Avalonia.Threading.DispatcherTimer.RunOnce(() =>
+        {
+            try
+            {
+                if (_toast is { } toast)
+                {
+                    var size = new PixelSize(
+                        Math.Max(1, (int)Math.Ceiling(toast.Width)),
+                        Math.Max(1, (int)Math.Ceiling(toast.Height)));
+                    using var bitmap = new Avalonia.Media.Imaging.RenderTargetBitmap(size, new Vector(96, 96));
+                    bitmap.Render(toast);
+                    bitmap.Save(path);
+                    Log.Write($"提醒卡片渲染已保存：{path}");
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Log.Write(ex, "提醒卡片渲染失败");
+            }
+            _lifetime.Shutdown();
+        }, TimeSpan.FromMilliseconds(900));
+    }
+
+    /// <summary>托盘菜单亮出新版本，再按「同一版本只提醒一次」决定要不要弹卡片。</summary>
+    private void ShowUpdateNotice(UpdateInfo info)
+    {
+        _availableUpdate = info;
+        if (_updateItem is not null)
+        {
+            _updateItem.Header = $"发现新版本 {info.Tag}";
+            _updateItem.IsVisible = true;
+        }
+
+        if (!_checker.ShouldNotify(info))
+            return;
+
+        _toast?.Close();
+        _toast = new Views.UpdateToast(info, _checker);
+        _toast.Closed += (_, _) => _toast = null;
+        _toast.Show();
     }
 
     /// <summary>
@@ -112,8 +241,10 @@ public sealed class AppHost : IDisposable
                 {
                     Log.Write(ex, "设置页渲染失败");
                 }
+                // 留足时间给网络请求：手动检查的截图验证要靠这段延迟。
                 _lifetime.Shutdown();
-            }, TimeSpan.FromMilliseconds(900));
+            }, TimeSpan.FromMilliseconds(
+                Environment.GetEnvironmentVariable("ORBIT_AUTO_CHECK") == "1" ? 2600 : 900));
         }, TimeSpan.FromMilliseconds(500));
     }
 
@@ -179,6 +310,11 @@ public sealed class AppHost : IDisposable
     {
         var menu = new NativeMenu();
 
+        // 有新版才显示，平时不占位置。
+        _updateItem = new NativeMenuItem("发现新版本") { IsVisible = false };
+        _updateItem.Click += (_, _) => OpenAvailableUpdate();
+        menu.Add(_updateItem);
+
         var open = new NativeMenuItem("打开菜单");
         open.Click += (_, _) => OpenMenuAtCursor();
         menu.Add(open);
@@ -216,6 +352,28 @@ public sealed class AppHost : IDisposable
         _radial?.ToggleAt(x, y);
     }
 
+    private void OpenAvailableUpdate()
+    {
+        if (_availableUpdate is { } info)
+            OpenUrl(info.Url);
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            // 只接受 https 的 GitHub 地址，避免把服务端返回的内容当成任意跳板。
+            if (!url.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log.Write(ex, "打开链接失败");
+        }
+    }
+
     /// <summary>
     /// 打开设置窗口。期间把全局手势停掉：设置页里要用鼠标拖拽排序，
     /// 而 Ctrl+Alt 组合键还会把环形菜单弹到设置窗口头上。
@@ -232,7 +390,7 @@ public sealed class AppHost : IDisposable
         if (_triggers is not null)
             _triggers.Paused = true;
 
-        var window = new SettingsWindow(_config, ConfigStore.DefaultPath);
+        var window = new SettingsWindow(_config, ConfigStore.DefaultPath, _checker);
         window.Applied += ApplySettings;
         window.Closed += (_, _) =>
         {
@@ -318,6 +476,8 @@ public sealed class AppHost : IDisposable
 
     public void Dispose()
     {
+        _toast?.Close();
+        _toast = null;
         _settings?.Close();
         _settings = null;
         _triggers?.Dispose();

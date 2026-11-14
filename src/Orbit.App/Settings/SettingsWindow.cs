@@ -13,15 +13,17 @@ using static Avalonia.Controls.Grid;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Orbit.App.Controls;
+using Orbit.App.Services;
 using Orbit.Core.Actions;
 using Orbit.Core.Config;
 
 namespace Orbit.App.Settings;
 
-public sealed class SettingsWindow : Window
+internal sealed class SettingsWindow : Window
 {
     private readonly OrbitConfig _working;
     private readonly string _configPath;
+    private readonly UpdateChecker _checker;
 
     private readonly DonutMenu _preview = new() { IsHitTestVisible = false };
     private readonly Panel _previewHost = new();
@@ -29,6 +31,7 @@ public sealed class SettingsWindow : Window
 
     private readonly ActionPanel _actionPanel;
     private readonly GesturePanel _gesturePanel;
+    private readonly GeneralPanel _generalPanel;
     private readonly Control[] _panels;
     private readonly Button[] _tabs;
     private readonly TextBlock _status = SettingsUi.Text("", 11.5, SettingsUi.TextMuted);
@@ -38,11 +41,13 @@ public sealed class SettingsWindow : Window
     private Slider? _opacitySlider;
     private Button? _resetButton;
     private int _resetArmed;
+    private int _currentTab;
 
-    public SettingsWindow(OrbitConfig config, string configPath)
+    public SettingsWindow(OrbitConfig config, string configPath, UpdateChecker checker)
     {
         _working = config.Clone();
         _configPath = configPath;
+        _checker = checker;
 
         Title = "Orbit 设置";
         Width = 940;
@@ -65,9 +70,10 @@ public sealed class SettingsWindow : Window
 
         _actionPanel = new ActionPanel(_working.Actions);
         _gesturePanel = new GesturePanel(_working.Triggers);
+        _generalPanel = new GeneralPanel(_working, _checker);
 
-        _panels = [_actionPanel, _gesturePanel];
-        _tabs = [MakeTab("动作", 0), MakeTab("手势", 1)];
+        _panels = [_actionPanel, _gesturePanel, _generalPanel];
+        _tabs = [MakeTab("动作", 0), MakeTab("手势", 1), MakeTab("通用", 2)];
 
         Content = BuildLayout();
         RefreshPreview();
@@ -129,7 +135,11 @@ public sealed class SettingsWindow : Window
 
         var header = new StackPanel { Margin = new Thickness(24, 20, 24, 12), Spacing = 3 };
         header.Children.Add(SettingsUi.Text("Orbit 设置", 19, SettingsUi.TextPrimary, FontWeight.SemiBold));
-        header.Children.Add(SettingsUi.Text(_configPath, 11, SettingsUi.TextMuted));
+        // 显示成 %APPDATA%\Orbit\config.json：跨机器一致，也不会把用户名带进截图。
+        var shown = _configPath.Replace(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "%APPDATA%",
+            StringComparison.OrdinalIgnoreCase);
+        header.Children.Add(SettingsUi.Text($"配置：{shown}", 11, SettingsUi.TextMuted));
         SetRow(header, 0);
         root.Children.Add(header);
 
@@ -320,6 +330,7 @@ public sealed class SettingsWindow : Window
 
     private void SwitchTab(int index)
     {
+        _currentTab = index;
         for (var i = 0; i < _panels.Length; i++)
         {
             _panels[i].IsVisible = i == index;
@@ -330,6 +341,7 @@ public sealed class SettingsWindow : Window
                 label.Foreground = selected ? SettingsUi.TextPrimary : SettingsUi.TextSecondary;
         }
         SetStatus("", SettingsUi.TextMuted);
+        RefreshPreviewNote();
     }
 
     private static Control WithMargin(Control control, double left, double top, double right, double bottom)
@@ -360,11 +372,29 @@ public sealed class SettingsWindow : Window
         _previewHost.Width = side;
         _previewHost.Height = side;
 
+        RefreshPreviewNote();
+    }
+
+    /// <summary>
+    /// 预览环下面的说明。文案跟着当前页走——在「通用」页里说「拖动右侧列表」
+    /// 会让人以为右边少了东西。
+    /// </summary>
+    private void RefreshPreviewNote()
+    {
+        var visible = _working.Actions.Count(a => a.Enabled);
         _previewNote.TextWrapping = TextWrapping.Wrap;
-        _previewNote.Text = visible.Count == 0
-            ? "当前没有启用的切片，环是空的"
-            : $"{visible.Count} 个切片。第 1 个从正上方开始顺时针排，拖动右侧列表可调顺序。";
-        _previewNote.Foreground = visible.Count == 0 ? SettingsUi.Warning : SettingsUi.TextMuted;
+
+        if (visible == 0)
+        {
+            _previewNote.Text = "当前没有启用的切片，环是空的";
+            _previewNote.Foreground = SettingsUi.Warning;
+            return;
+        }
+
+        _previewNote.Foreground = SettingsUi.TextMuted;
+        _previewNote.Text = _currentTab == 2
+            ? $"{visible} 个切片。左侧外观设置对三种触发方式同时生效。"
+            : $"{visible} 个切片。第 1 个从正上方开始顺时针排，拖动右侧列表可调顺序。";
     }
 
     // ───────────── 命令 ─────────────
@@ -400,6 +430,16 @@ public sealed class SettingsWindow : Window
         }
 
         _working.EnsureConsistency();
+
+        // 自启要写注册表，可能被安全软件拦下。失败时停下来让用户看到原因，
+        // 而不是先把配置存了、留下一个「说开着其实没开」的状态。
+        if (!AutoStart.Sync(_working.StartWithWindows, out var autoStartError))
+        {
+            SwitchTab(2);
+            SetStatus($"开机自启设置失败：{autoStartError}", SettingsUi.Warning);
+            return;
+        }
+
         try
         {
             ConfigStore.Save(_working);
@@ -447,6 +487,8 @@ public sealed class SettingsWindow : Window
         _working.OuterRadius = fresh.OuterRadius;
         _working.HoleRatio = fresh.HoleRatio;
         _working.SliceOpacity = fresh.SliceOpacity;
+        _working.StartWithWindows = fresh.StartWithWindows;
+        _working.CheckForUpdates = fresh.CheckForUpdates;
 
         if (_radiusSlider is not null)
             _radiusSlider.Value = _working.OuterRadius;
@@ -457,6 +499,7 @@ public sealed class SettingsWindow : Window
 
         _actionPanel.Rebuild();
         _gesturePanel.Rebuild();
+        _generalPanel.Rebuild();
         RefreshPreview();
         SetStatus("已恢复为默认配置，点保存后生效", SettingsUi.TextMuted);
     }

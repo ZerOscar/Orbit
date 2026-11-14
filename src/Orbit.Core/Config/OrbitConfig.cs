@@ -27,6 +27,12 @@ public sealed class OrbitConfig
 
     public bool Paused { get; set; }
 
+    /// <summary>开机自启。真正生效的是注册表 Run 项，这里只记录用户的意图。</summary>
+    public bool StartWithWindows { get; set; }
+
+    /// <summary>启动时静默检查新版本。默认开，检查失败不会打扰用户。</summary>
+    public bool CheckForUpdates { get; set; } = true;
+
     /// <summary>把明显无效的配置修正回可用状态，不抛异常。</summary>
     public void EnsureConsistency()
     {
@@ -50,6 +56,8 @@ public sealed class OrbitConfig
         HoleRatio = HoleRatio,
         SliceOpacity = SliceOpacity,
         Paused = Paused,
+        StartWithWindows = StartWithWindows,
+        CheckForUpdates = CheckForUpdates,
     };
 }
 
