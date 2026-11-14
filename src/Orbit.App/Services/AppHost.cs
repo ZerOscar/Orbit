@@ -126,21 +126,27 @@ public sealed class AppHost : IDisposable
 
     /// <summary>
     /// 调试用：伪造一次「发现新版本」，在没有真新版可测时验证提醒卡片。
-    /// ORBIT_FAKE_UPDATE=1 启用；再给 ORBIT_TOAST_SNAPSHOT=&lt;路径&gt; 会渲染成 PNG 后退出。
+    /// ORBIT_FAKE_UPDATE=v1.2.0 指定版本（写 1 表示 v9.9.9）；
+    /// 再给 ORBIT_TOAST_SNAPSHOT=&lt;路径&gt; 会渲染成 PNG 后退出。
     /// </summary>
     private bool MaybeFakeUpdate()
     {
-        if (Environment.GetEnvironmentVariable("ORBIT_FAKE_UPDATE") is not { Length: > 0 })
+        if (Environment.GetEnvironmentVariable("ORBIT_FAKE_UPDATE") is not { Length: > 0 } raw)
             return false;
 
+        var tag = raw is "1" or "true" ? "v9.9.9" : raw;
+        var version = Version.TryParse(tag.TrimStart('v', 'V'), out var parsed)
+            ? parsed
+            : new Version(9, 9, 9);
+
         var fake = new UpdateInfo(
-            new Version(9, 9, 9),
-            "v9.9.9",
+            version,
+            tag,
             $"https://github.com/{UpdateChecker.Repository}/releases",
             DateTimeOffset.Now,
             null);
 
-        Log.Write("使用伪造的新版本信息（调试）");
+        Log.Write($"使用伪造的新版本信息（调试）：{tag}");
         ShowUpdateNotice(fake);
         MaybeToastSnapshot();
         return true;
