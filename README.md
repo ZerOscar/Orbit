@@ -230,6 +230,7 @@ ORBIT_AUTO_CHECK=1 ...                                               # 打开设
 | `settings_test.py` | 设置页拖拽重排 + 保存，之后核对 `config.json` |
 | `measure_center.py` | 逐像素测每个切片的文字居中偏差 |
 | `roundtrip.py` / `capture_window.py` / `crop.py` / `analyze_png.py` | 开合回归、抓窗口、裁剪、PNG 读取 |
+| `shot_screen.py` | 截屏到 PNG，可指定区域；验证提醒卡片这类没有标题的窗口时用 |
 | `make_icon.py` | 生成 `orbit.ico` |
 | `publish.ps1` | 发布脚本，见下 |
 
